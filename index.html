@@ -1,0 +1,1930 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>近代中國風雲錄 - DSE歷史卡牌對戰</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Font Awesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700;900&family=Noto+Sans+TC:wght@400;700&display=swap" rel="stylesheet">
+  <!-- PeerJS for Free Cross-Device Signaling (用於 GitHub Pages 零設定跨裝置連線) -->
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <style>
+    body {
+      font-family: 'Noto Sans TC', sans-serif;
+      touch-action: manipulation;
+      user-select: none;
+      -webkit-user-select: none;
+      background-color: #121212;
+      color: #e0e0e0;
+    }
+    .font-serif-tc {
+      font-family: 'Noto Serif TC', serif;
+    }
+    .card-transition {
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .card-transition:hover {
+      transform: translateY(-6px) scale(1.02);
+      box-shadow: 0 10px 20px -5px rgba(217, 119, 6, 0.4);
+    }
+
+    /* 畫面震動特效 */
+    @keyframes shake {
+      0%, 100% { transform: translate(0, 0); }
+      20% { transform: translate(-8px, 6px); }
+      40% { transform: translate(8px, -6px); }
+      60% { transform: translate(-5px, -4px); }
+      80% { transform: translate(5px, 4px); }
+    }
+    .anim-shake {
+      animation: shake 0.4s ease-in-out;
+    }
+
+    /* 攻擊衝擊波/閃光 */
+    @keyframes flash-red {
+      0% { box-shadow: 0 0 0px rgba(239, 68, 68, 0); }
+      50% { box-shadow: 0 0 35px 10px rgba(239, 68, 68, 0.8); border-color: #ef4444 !important; }
+      100% { box-shadow: 0 0 0px rgba(239, 68, 68, 0); }
+    }
+    .anim-hit {
+      animation: flash-red 0.5s ease-out;
+    }
+
+    /* 飄浮傷害/治療數字 */
+    @keyframes float-up {
+      0% { opacity: 1; transform: translateY(0) scale(1); }
+      50% { opacity: 1; transform: translateY(-30px) scale(1.3); }
+      100% { opacity: 0; transform: translateY(-50px) scale(1); }
+    }
+    .damage-pop {
+      position: absolute;
+      font-weight: 900;
+      font-size: 1.5rem;
+      pointer-events: none;
+      z-index: 50;
+      animation: float-up 0.9s ease-out forwards;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+    }
+
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #1f2937;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #4b5563;
+      border-radius: 3px;
+    }
+  </style>
+
+  <!-- Firebase SDK (ES Module) -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot, collection, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // 全局配置與應用 ID 讀取 (支援 GitHub Pages 等獨立託管環境)
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'history-card-game';
+    const firebaseConfig = (typeof __firebase_config !== 'undefined' && __firebase_config) ? JSON.parse(__firebase_config) : {
+      apiKey: "AIzaSyDummyKeyForGitHubPagesFallback12345",
+      authDomain: "history-card-game.firebaseapp.com",
+      projectId: "history-card-game"
+    };
+
+    let app, db, auth;
+    try {
+      app = initializeApp(firebaseConfig);
+      db = getFirestore(app);
+      auth = getAuth(app);
+    } catch (e) {
+      console.warn("Firebase 初始化警告 (GitHub Pages 環境可能缺少真實配置):", e);
+    }
+
+    window.firebaseApp = app;
+    window.firebaseDb = db;
+    window.firebaseAuth = auth;
+    window.appId = appId;
+
+    // 將 Firestore 函數掛載至 window 物件，供全域腳本使用
+    window.firestore = {
+      doc, setDoc, getDoc, updateDoc, onSnapshot, collection, getDocs, deleteDoc
+    };
+
+    // 全域 PeerJS 跨裝置通訊通道 (GitHub Pages 免設定連線引擎)
+    window.peerEngine = {
+      peer: null,
+      conn: null,
+      isHost: false,
+
+      initHost(roomId, onDataReceived) {
+        if (typeof Peer === 'undefined') {
+          console.warn("[PeerEngine] PeerJS 未載入，改用雲端廣播通道。");
+          return;
+        }
+        try {
+          if (this.peer) this.peer.destroy();
+          const hostPeerId = `hist_room_${roomId}`;
+          this.peer = new Peer(hostPeerId);
+          this.isHost = true;
+
+          this.peer.on('open', (id) => {
+            console.log("[PeerEngine] 房主通道已成功開通, ID:", id);
+          });
+
+          this.peer.on('connection', (connection) => {
+            this.conn = connection;
+            console.log("[PeerEngine] 訪客已連線進來！");
+            
+            this.conn.on('data', (data) => {
+              if (onDataReceived) onDataReceived(data);
+            });
+          });
+
+          this.peer.on('error', (err) => {
+            console.warn("[PeerEngine] 房主通道提示:", err);
+          });
+        } catch (e) {
+          console.warn("[PeerEngine] 初始化失敗:", e);
+        }
+      },
+
+      connectToHost(roomId, onDataReceived) {
+        if (typeof Peer === 'undefined') {
+          console.warn("[PeerEngine] PeerJS 未載入，改用雲端廣播通道。");
+          return;
+        }
+        try {
+          if (this.peer) this.peer.destroy();
+          this.peer = new Peer();
+          this.isHost = false;
+
+          const hostPeerId = `hist_room_${roomId}`;
+
+          this.peer.on('open', () => {
+            console.log("[PeerEngine] 連線至房主:", hostPeerId);
+            this.conn = this.peer.connect(hostPeerId);
+
+            this.conn.on('open', () => {
+              console.log("[PeerEngine] 成功建立跨裝置直連通道！");
+              if (window.onPeerConnected) window.onPeerConnected();
+            });
+
+            this.conn.on('data', (data) => {
+              if (onDataReceived) onDataReceived(data);
+            });
+
+            this.conn.on('error', (err) => {
+              console.error("[PeerEngine] 連線錯誤:", err);
+            });
+          });
+        } catch(e) {
+          console.warn("[PeerEngine] 連線初始化失敗:", e);
+        }
+      },
+
+      send(data) {
+        if (this.conn && this.conn.open) {
+          this.conn.send(data);
+        }
+      }
+    };
+
+    // 免權限 public 信令輪詢備份 (確保 GitHub Pages 萬無一失)
+    window.publicRelay = {
+      interval: null,
+      async postState(roomId, data) {
+        try {
+          const db = window.firebaseDb;
+          if (db && window.firestore) {
+            const { doc, setDoc } = window.firestore;
+            const roomRef = doc(db, 'artifacts', window.appId, 'public', 'data', 'rooms', roomId);
+            await setDoc(roomRef, data);
+          }
+        } catch(e) {
+          // Fallback to localStorage for single-device multi-tab testing
+          localStorage.setItem(`hist_room_${roomId}`, JSON.stringify(data));
+        }
+      },
+      async getState(roomId) {
+        try {
+          const db = window.firebaseDb;
+          if (db && window.firestore) {
+            const { doc, getDoc } = window.firestore;
+            const roomRef = doc(db, 'artifacts', window.appId, 'public', 'data', 'rooms', roomId);
+            const snap = await getDoc(roomRef);
+            if (snap.exists()) return snap.data();
+          }
+        } catch(e) {}
+        const local = localStorage.getItem(`hist_room_${roomId}`);
+        return local ? JSON.parse(local) : null;
+      }
+    };
+
+    // Firebase 登入與初始化 (具備 GitHub Pages 超時與防護機制)
+    window.initFirebaseAuth = async function() {
+      if (!auth) return null;
+      if (auth.currentUser) return auth.currentUser;
+
+      return new Promise((resolve) => {
+        // 設定 2.5 秒超時防護，防止 GitHub 上因網絡連線卡死
+        const timeoutId = setTimeout(() => {
+          console.warn("Firebase Auth 驗證超時，啟動降級模式以保障遊玩體感。");
+          resolve(null);
+        }, 2500);
+
+        const authToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        const unsubscribe = onAuthStateChanged(auth, async (user) => {
+          clearTimeout(timeoutId);
+          unsubscribe();
+          if (user) {
+            window.currentUser = user;
+            resolve(user);
+          } else {
+            try {
+              if (authToken) {
+                const res = await signInWithCustomToken(auth, authToken);
+                window.currentUser = res.user;
+                resolve(res.user);
+              } else {
+                const res = await signInAnonymously(auth);
+                window.currentUser = res.user;
+                resolve(res.user);
+              }
+            } catch (err) {
+              console.error("Firebase Auth Error:", err);
+              resolve(null);
+            }
+          }
+        });
+      });
+    };
+  </script>
+</head>
+<body class="min-h-screen flex flex-col justify-between overflow-x-hidden">
+
+  <!-- 頂部導覽列與遊戲標題 -->
+  <header class="bg-stone-900 border-b border-stone-800 px-4 py-3 flex justify-between items-center shadow-md">
+    <div class="flex items-center gap-2">
+      <span class="text-amber-500 text-xl md:text-2xl"><i class="fa-solid fa-landmark"></i></span>
+      <div>
+        <h1 class="font-serif-tc font-bold text-base md:text-lg text-amber-400 leading-tight">近代中國風雲錄</h1>
+        <p class="text-[10px] md:text-xs text-stone-400">DSE 中史專題對戰 (1911 - 1949)</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <button id="btn-rules" class="bg-stone-800 hover:bg-stone-700 text-stone-300 text-xs px-3 py-1.5 rounded-lg border border-stone-700 flex items-center gap-1 transition">
+        <i class="fa-solid fa-circle-info"></i> 玩法說明
+      </button>
+      <button id="btn-restart" class="hidden bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs px-3 py-1.5 rounded-lg border border-stone-700 transition flex items-center gap-1" onclick="window.resetGame()">
+        <i class="fa-solid fa-arrow-left"></i> 返回主選單
+      </button>
+    </div>
+  </header>
+
+  <!-- 主遊戲容器 -->
+  <main class="flex-1 max-w-5xl w-full mx-auto p-2 md:p-4 flex flex-col">
+
+    <!-- 畫面 0: 選擇模式 (單人練習 vs 雙人線上對戰) -->
+    <section id="scene-mode-select" class="flex-1 flex flex-col justify-center items-center py-6">
+      <div class="text-center mb-8">
+        <h2 class="font-serif-tc text-2xl md:text-3xl font-black text-amber-400 mb-2">選擇對戰模式</h2>
+        <p class="text-xs md:text-sm text-stone-400">體驗歷史決擇，支援單人練習與全網玩家實時對戰</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-2xl px-4">
+        <!-- 單人對戰卡片 -->
+        <div onclick="window.chooseMode('ai')" class="bg-stone-900 border border-stone-800 hover:border-amber-500 rounded-2xl p-6 cursor-pointer card-transition text-center flex flex-col items-center justify-between shadow-xl group">
+          <div class="text-5xl mb-4 group-hover:scale-110 transition">🤖</div>
+          <h3 class="font-serif-tc font-bold text-xl text-amber-400 mb-2">單人對戰 (VS AI)</h3>
+          <p class="text-xs text-stone-400 leading-relaxed mb-4">精準模擬 DSE 中史核心歷史時期，與 AI 人工智慧進行歷史戰術對決。</p>
+          <span class="bg-amber-950 text-amber-300 text-xs px-4 py-2 rounded-xl border border-amber-800 font-bold group-hover:bg-amber-600 group-hover:text-stone-950 transition">開始人機對決</span>
+        </div>
+
+        <!-- 雙人聯機卡片 -->
+        <div onclick="window.chooseMode('pvp')" class="bg-stone-900 border border-stone-800 hover:border-amber-500 rounded-2xl p-6 cursor-pointer card-transition text-center flex flex-col items-center justify-between shadow-xl group">
+          <div class="text-5xl mb-4 group-hover:scale-110 transition">⚔️</div>
+          <h3 class="font-serif-tc font-bold text-xl text-amber-400 mb-2">雙人線上對戰 (PVP)</h3>
+          <p class="text-xs text-stone-400 leading-relaxed mb-4">建立或加入線上房間，與朋友或全網歷史愛好者進行實時卡牌博弈！</p>
+          <span class="bg-amber-950 text-amber-300 text-xs px-4 py-2 rounded-xl border border-amber-800 font-bold group-hover:bg-amber-600 group-hover:text-stone-950 transition">進入線上對戰大廳</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 畫面 0.5: PVP 線上大廳 -->
+    <section id="scene-pvp-lobby" class="hidden flex-1 flex flex-col justify-center items-center py-4">
+      <div class="w-full max-w-2xl bg-stone-950 border border-stone-800 rounded-2xl p-4 md:p-6 shadow-xl">
+        <div class="flex justify-between items-center mb-4 pb-3 border-b border-stone-800">
+          <h2 class="font-serif-tc text-lg md:text-xl font-bold text-amber-400"><i class="fa-solid fa-globe"></i> 線上房間大廳</h2>
+          <button onclick="window.showModeSelect()" class="text-xs text-stone-400 hover:text-amber-400"><i class="fa-solid fa-arrow-left"></i> 返回</button>
+        </div>
+
+        <!-- 輸入房間號加入 -->
+        <div class="flex gap-2 mb-6">
+          <input type="text" id="input-room-id" placeholder="輸入 6 位數房間邀請碼..." class="flex-1 bg-stone-900 border border-stone-700 rounded-xl px-3 py-2 text-xs text-stone-200 uppercase focus:outline-none focus:border-amber-500">
+          <button onclick="window.joinRoomById()" class="bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold px-4 py-2 rounded-xl text-xs border border-amber-400 transition">加入房間</button>
+        </div>
+
+        <!-- 建立新房間按鈕 -->
+        <button onclick="window.openCreateRoomModal()" class="w-full bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-stone-950 font-bold py-3 rounded-xl text-sm border border-amber-400 mb-6 shadow-md transition">
+          <i class="fa-solid fa-plus-circle"></i> 建立全新歷史對戰房間
+        </button>
+
+        <!-- 房間大廳列表 -->
+        <div class="text-xs font-bold text-stone-400 mb-2 flex justify-between items-center">
+          <span>當前等待中的公開房間</span>
+          <div class="flex gap-2">
+            <button onclick="window.cleanupOldRooms()" class="text-red-400 hover:underline"><i class="fa-solid fa-trash-can"></i> 清理殘留房間</button>
+            <button onclick="window.fetchRoomList()" class="text-amber-500 hover:underline"><i class="fa-solid fa-rotate-right"></i> 重新整理</button>
+          </div>
+        </div>
+        <div id="room-list-container" class="space-y-2 max-h-48 overflow-y-auto pr-1">
+          <div class="text-center py-6 text-stone-500 text-xs">正在載入房間列表...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 畫面 1: 選擇歷史時期與陣營 -->
+    <section id="scene-faction-select" class="hidden flex-1 flex flex-col justify-center items-center py-4 relative">
+      <!-- 頂部返回按鈕 -->
+      <div class="w-full max-w-3xl flex justify-between items-center mb-4 px-2">
+        <button onclick="window.showModeSelect()" class="bg-stone-800 hover:bg-stone-700 text-amber-400 text-xs px-3 py-1.5 rounded-lg border border-stone-700 transition flex items-center gap-1 font-bold">
+          <i class="fa-solid fa-arrow-left"></i> 重選模式 (單人/雙人)
+        </button>
+        <span class="text-xs text-stone-400">目前模式：<strong id="mode-label-tag" class="text-amber-400">單人模式 (VS AI)</strong></span>
+      </div>
+      
+      <!-- 時期選擇器 -->
+      <div class="w-full max-w-3xl mb-6">
+        <h2 class="font-serif-tc text-center text-xl md:text-2xl font-black text-amber-400 mb-3">第一步：選擇歷史時期</h2>
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 bg-stone-950 p-2 rounded-xl border border-stone-800">
+          <button onclick="window.changeEra('era1')" id="era-btn-era1" class="era-btn py-2.5 px-1 text-xs font-bold rounded-lg border border-amber-500 bg-amber-900/40 text-amber-300 transition text-center flex flex-col items-center justify-center min-h-[58px]">
+            <span>📜 辛亥革命</span><span class="text-[9px] opacity-75 font-normal mt-0.5">(1911 - 1912)</span>
+          </button>
+          <button onclick="window.changeEra('era1_5')" id="era-btn-era1_5" class="era-btn py-2.5 px-1 text-xs font-bold rounded-lg border border-stone-800 text-stone-400 hover:text-stone-200 transition text-center flex flex-col items-center justify-center min-h-[58px]">
+            <span>⚔️ 二次與護國</span><span class="text-[9px] opacity-75 font-normal mt-0.5">(1913 - 1916)</span>
+          </button>
+          <button onclick="window.changeEra('era1_8')" id="era-btn-era1_8" class="era-btn py-2.5 px-1 text-xs font-bold rounded-lg border border-stone-800 text-stone-400 hover:text-stone-200 transition text-center flex flex-col items-center justify-center min-h-[58px]">
+            <span>🎓 五四與啟蒙</span><span class="text-[9px] opacity-75 font-normal mt-0.5">(1915 - 1919)</span>
+          </button>
+          <button onclick="window.changeEra('era2')" id="era-btn-era2" class="era-btn py-2.5 px-1 text-xs font-bold rounded-lg border border-stone-800 text-stone-400 hover:text-stone-200 transition text-center flex flex-col items-center justify-center min-h-[58px]">
+            <span>🚩 北伐與軍閥</span><span class="text-[9px] opacity-75 font-normal mt-0.5">(1924 - 1928)</span>
+          </button>
+          <button onclick="window.changeEra('era3')" id="era-btn-era3" class="era-btn py-2.5 px-1 text-xs font-bold rounded-lg border border-stone-800 text-stone-400 hover:text-stone-200 transition text-center flex flex-col items-center justify-center min-h-[58px]">
+            <span>🛡️ 全面抗戰</span><span class="text-[9px] opacity-75 font-normal mt-0.5">(1937 - 1945)</span>
+          </button>
+          <button onclick="window.changeEra('era4')" id="era-btn-era4" class="era-btn py-2.5 px-1 text-xs font-bold rounded-lg border border-stone-800 text-stone-400 hover:text-stone-200 transition text-center flex flex-col items-center justify-center min-h-[58px]">
+            <span>🚩 國共內戰</span><span class="text-[9px] opacity-75 font-normal mt-0.5">(1945 - 1949)</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 陣營選擇標題與簡介 -->
+      <div class="text-center max-w-xl mb-4">
+        <h3 class="font-serif-tc text-lg md:text-xl font-bold text-stone-300">第二步：選擇你的歷史陣營</h3>
+        <p id="era-description" class="text-xs text-amber-500/90 mt-1 min-h-[1.5rem]">【辛亥革命】革命黨人起義推翻滿清專制，清政府皇族內閣垂死掙扎。</p>
+      </div>
+
+      <!-- 可選陣營列表 -->
+      <div id="faction-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-3xl px-2">
+        <!-- JavaScript 動態生成卡牌 -->
+      </div>
+    </section>
+
+    <!-- 畫面 2: 對戰棋盤畫面 -->
+    <section id="scene-battle" class="hidden flex-1 flex flex-col justify-between gap-2 py-1">
+      
+      <!-- 對手資訊區域 -->
+      <div id="ai-info-box" class="bg-stone-950/80 border border-stone-800 rounded-xl p-2.5 flex items-center justify-between shadow relative">
+        <div class="flex items-center gap-3">
+          <div class="relative">
+            <div id="ai-avatar" class="w-10 h-10 md:w-12 md:h-12 rounded-full bg-stone-800 border-2 border-red-600 flex items-center justify-center text-xl md:text-2xl">
+              🐉
+            </div>
+            <span id="opponent-badge" class="absolute -bottom-1 -right-1 text-[10px] bg-red-900 text-red-200 px-1 rounded font-bold">AI</span>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h3 id="ai-name" class="font-serif-tc font-bold text-stone-200 text-sm md:text-base">清朝政府</h3>
+              <span id="ai-faction-tag" class="text-[10px] bg-stone-800 text-amber-500 px-1.5 py-0.5 rounded border border-amber-900/50">皇族內閣</span>
+            </div>
+            <!-- 血條/民心值 -->
+            <div class="w-32 md:w-48 bg-stone-800 rounded-full h-3 mt-1 relative overflow-hidden border border-stone-700">
+              <div id="ai-hp-bar" class="bg-gradient-to-r from-red-600 to-amber-600 h-full rounded-full transition-all duration-500" style="width: 100%;"></div>
+              <span id="ai-hp-text" class="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-white shadow-sm">100 / 100</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 對手在場政治牌 -->
+        <div id="ai-politics-zone" class="hidden min-w-[120px] bg-blue-950/40 border border-blue-600/60 rounded-lg p-1.5 text-center relative">
+          <span class="text-[9px] bg-blue-900 text-blue-200 px-1 rounded font-bold absolute -top-2 left-2">在場政治條約</span>
+          <div id="ai-politics-name" class="text-xs font-bold text-blue-300 truncate">--</div>
+          <div class="text-[10px] text-stone-300">耐久度: <span id="ai-politics-hp" class="font-bold text-amber-400">0</span></div>
+        </div>
+
+        <div class="text-right flex flex-col items-end">
+          <span id="battle-era-tag" class="text-[10px] bg-amber-950 text-amber-400 border border-amber-800 px-2 py-0.5 rounded">辛亥革命時期</span>
+          <span id="pvp-room-code-tag" class="hidden text-[10px] text-amber-500 font-bold mt-1">房間號: ------</span>
+        </div>
+      </div>
+
+      <!-- 中央對決區域：隨機歷史環境事件與戰法 -->
+      <div class="my-auto py-1 flex flex-col items-center justify-center relative">
+        
+        <!-- 隨機歷史事件展示牌 -->
+        <div id="historical-event-banner" class="w-full max-w-lg bg-stone-900/90 border border-amber-600/50 rounded-lg p-2 mb-2 flex items-center gap-3 text-left shadow-lg">
+          <span class="text-2xl" id="event-icon">📜</span>
+          <div class="flex-1 min-w-0">
+            <div class="flex justify-between items-center">
+              <span class="text-[10px] text-amber-500 font-bold uppercase tracking-wider">當前時期歷史背景環境</span>
+              <span id="event-buff-tag" class="text-[10px] bg-amber-900/60 text-amber-300 px-1.5 rounded border border-amber-700">政治條約效果+4</span>
+            </div>
+            <h4 id="event-title" class="font-serif-tc text-xs md:text-sm font-bold text-amber-300 truncate">武昌起義烽火起</h4>
+            <p id="event-desc" class="text-[10px] text-stone-400 truncate">湖北新軍起義爆發，全國響應，軍事行動威力提升。</p>
+          </div>
+        </div>
+
+        <!-- 攻擊目標選擇開關 -->
+        <div id="target-select-box" class="hidden my-1 bg-stone-900 border border-blue-500/60 rounded-lg p-1.5 flex items-center gap-3 text-xs">
+          <span class="text-blue-300 font-bold"><i class="fa-solid fa-crosshairs"></i> 軍事攻擊目標：</span>
+          <label class="inline-flex items-center gap-1 text-stone-200 cursor-pointer">
+            <input type="radio" name="attack-target" value="boss" checked class="accent-amber-500">
+            <span>敵方本體</span>
+          </label>
+          <label class="inline-flex items-center gap-1 text-stone-200 cursor-pointer">
+            <input type="radio" name="attack-target" value="politics" class="accent-blue-500">
+            <span class="text-blue-400 font-bold">拆除敵方政治牌</span>
+          </label>
+        </div>
+
+        <!-- 戰術提示與當前狀態 -->
+        <div id="battle-log" class="mt-1 bg-stone-950/90 border border-amber-900/30 text-amber-200 text-xs px-4 py-1.5 rounded-full max-w-md w-full text-center shadow-lg backdrop-blur-sm min-h-[32px] flex items-center justify-center">
+          請點擊下方手牌選擇並出牌！
+        </div>
+        <div id="pvp-readiness-indicator" class="hidden text-[11px] font-bold text-amber-400 mt-1 flex gap-3">
+          <span id="p1-ready-status"><i class="fa-solid fa-circle-notch fa-spin"></i> 我方：思考中</span>
+          <span id="p2-ready-status"><i class="fa-solid fa-circle-notch fa-spin"></i> 對方：思考中</span>
+        </div>
+      </div>
+
+      <!-- 玩家資訊區域 -->
+      <div id="player-info-box" class="bg-stone-950/80 border border-stone-800 rounded-xl p-2.5 flex items-center justify-between shadow relative">
+        <div class="flex items-center gap-3">
+          <div class="relative">
+            <div id="player-avatar" class="w-10 h-10 md:w-12 md:h-12 rounded-full bg-stone-800 border-2 border-amber-500 flex items-center justify-center text-xl md:text-2xl">
+              ☀️
+            </div>
+            <span class="absolute -bottom-1 -right-1 text-[10px] bg-amber-700 text-amber-100 px-1 rounded font-bold">玩家</span>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h3 id="player-name" class="font-serif-tc font-bold text-amber-400 text-sm md:text-base">革命黨</h3>
+              <span id="player-faction-tag" class="text-[10px] bg-amber-950 text-amber-300 px-1.5 py-0.5 rounded border border-amber-800">革命黨人</span>
+            </div>
+            <!-- 血條與歷史能量 -->
+            <div class="flex items-center gap-2 mt-1">
+              <div class="w-28 md:w-36 bg-stone-800 rounded-full h-3 relative overflow-hidden border border-stone-700">
+                <div id="player-hp-bar" class="bg-gradient-to-r from-amber-600 to-green-600 h-full rounded-full transition-all duration-500" style="width: 100%;"></div>
+                <span id="player-hp-text" class="absolute inset-0 flex items-center justify-center text-[9px] font-bold text-white shadow-sm">100 / 100</span>
+              </div>
+              <div class="flex items-center text-xs text-amber-400 gap-1 bg-stone-900 px-2 py-0.5 rounded border border-stone-800">
+                <span>⚡ 能量:</span>
+                <span id="player-energy-text" class="font-bold text-amber-300">2/3</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 玩家在場政治牌 -->
+        <div id="player-politics-zone" class="hidden min-w-[120px] bg-blue-950/40 border border-blue-600/60 rounded-lg p-1.5 text-center relative">
+          <span class="text-[9px] bg-blue-900 text-blue-200 px-1 rounded font-bold absolute -top-2 left-2">我的政治條約</span>
+          <div id="player-politics-name" class="text-xs font-bold text-blue-300 truncate">--</div>
+          <div class="text-[10px] text-stone-300">耐久度: <span id="player-politics-hp" class="font-bold text-amber-400">0</span></div>
+        </div>
+
+        <!-- 回合行動按鈕區 -->
+        <div class="flex items-center gap-1.5 md:gap-2">
+          <button id="btn-redraw" onclick="window.redrawHand()" class="bg-stone-800 hover:bg-stone-700 text-amber-300 text-xs px-2.5 py-2 rounded-lg border border-amber-500/40 shadow transition flex items-center gap-1" title="消耗 1 點能量重換手牌">
+            <i class="fa-solid fa-arrows-rotate"></i> 換牌
+          </button>
+          <button id="btn-play-card" disabled onclick="window.playSelectedCard()" class="bg-amber-600 hover:bg-amber-500 disabled:bg-stone-800 disabled:text-stone-600 text-stone-950 font-bold px-3 md:px-4 py-2 rounded-lg text-xs md:text-sm border border-amber-400 shadow transition flex items-center gap-1">
+            <i class="fa-solid fa-paper-plane"></i> 打出卡牌
+          </button>
+        </div>
+      </div>
+
+      <!-- 玩家手牌面板 -->
+      <div class="relative w-full">
+        <div class="text-xs text-stone-400 mb-1 flex justify-between px-1">
+          <span><i class="fa-solid fa-clone"></i> 手牌庫 (固定 1軍+1政+1思+2技能 - 剩 1 張時自動補滿)</span>
+          <span id="round-counter" class="text-amber-500 font-bold">第 1 回合</span>
+        </div>
+        <div id="player-hand" class="flex gap-2 md:gap-3 overflow-x-auto pb-2 pt-1 px-1 snap-x scrollbar-thin">
+          <!-- 卡牌動態生成 -->
+        </div>
+      </div>
+
+    </section>
+
+    <!-- 畫面 3: 對決結果彈窗 -->
+    <div id="modal-result" class="hidden fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
+      <div class="bg-stone-900 border-2 border-amber-600/80 rounded-2xl p-5 md:p-8 max-w-xl w-full text-center relative overflow-hidden shadow-2xl">
+        <span id="result-icon" class="text-5xl md:text-6xl mb-3 inline-block">⚖️</span>
+        <h2 id="result-title" class="font-serif-tc text-2xl md:text-3xl font-black text-amber-400 mb-1">時期對決結果</h2>
+        <p id="result-type" class="text-xs font-bold uppercase tracking-widest mb-4">【 當期局勢結算 】</p>
+
+        <div class="bg-stone-950/80 border border-stone-800 rounded-xl p-4 mb-6 text-left text-xs md:text-sm leading-relaxed text-stone-300 max-h-56 overflow-y-auto">
+          <p id="result-description" class="mb-2">當前時期的對決結果分析...</p>
+          <hr class="border-stone-800 my-2">
+          <p id="result-dse-note" class="text-amber-400/90 italic"><i class="fa-solid fa-graduation-cap"></i> <strong>DSE 中史考點關鍵解析：</strong>...</p>
+        </div>
+
+        <div class="flex justify-center gap-3">
+          <button onclick="window.resetGame()" class="bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-stone-950 font-bold px-6 py-2.5 rounded-xl text-sm border border-amber-400 shadow-lg transition">
+            <i class="fa-solid fa-rotate-right"></i> 返回主選單
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 玩法說明彈窗 -->
+    <div id="modal-rules" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="bg-stone-900 border border-amber-700/60 rounded-2xl p-5 max-w-lg w-full text-left relative max-h-[85vh] flex flex-col">
+        <div class="flex justify-between items-center pb-3 border-b border-stone-800 mb-3">
+          <h3 class="font-serif-tc font-bold text-lg text-amber-400"><i class="fa-solid fa-book"></i> 遊戲玩法說明</h3>
+          <button id="btn-close-rules" class="text-stone-400 hover:text-white text-xl"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="space-y-3 text-xs md:text-sm text-stone-300 overflow-y-auto pr-1">
+          <p><strong class="text-amber-400">1. 單人與線上 PVP 雙對戰模式：</strong> 支援獨自與 AI 戰術對戰，亦可建立房間發送 6 位數邀請碼與朋友跨裝置線上對決。</p>
+          <p><strong class="text-amber-400">2. 雙軌標準手牌結構：</strong> 每次手牌補充皆精準保障：
+            <br>• ⚔️ 1 張軍事常規牌
+            <br>• 📜 1 張政治常規牌
+            <br>• 💚 1 張思想常規牌
+            <br>• ⚡ 2 張歷史專屬事件技能牌
+          </p>
+          <p><strong class="text-amber-400">3. 補牌機制：</strong> 保持 5 張手牌，當手牌消耗至僅剩最後 1 張時自動一次過補充至 5 張！亦可消耗 1 點能量「換牌」。</p>
+          <p><strong class="text-amber-400">4. 政治條約與目標打擊：</strong> 發動政治牌可在場上建立防禦護盾陣地。玩家打出軍事攻擊牌時，可切換選定「打擊敵方本體」或「拆除敵方政治牌」。</p>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- JavaScript 遊戲核心邏輯 -->
+  <script>
+    // 全局遊戲狀態
+    window.gameState = {
+      mode: 'ai', // 'ai' 或 'pvp'
+      roomId: null,
+      playerRole: 'host', // 'host' 或 'guest'
+      currentEra: 'era1',
+      playerFaction: null,
+      aiFaction: null,
+      playerHp: 100,
+      aiHp: 100,
+      playerMaxHp: 100,
+      aiMaxHp: 100,
+      playerEnergy: 2,
+      maxEnergy: 3,
+      playerPolitics: null,
+      aiPolitics: null,
+      isPlayerStunned: false,
+      isAiStunned: false,
+      selectedCardIndex: null,
+      round: 1,
+      turn: 'host',
+      playerHand: [],
+      currentEnvEvent: null,
+      hasExtraTurn: false,
+      isGameOver: false,
+      roomUnsubscribe: null,
+      isReadyThisRound: false, // PVP 同步鎖定標記
+      resolvedPvpRound: 0, // 防止重複處理同一輪的標記
+      lastStateTime: 0 // 防止舊資料覆蓋新狀態的微秒時間戳
+    };
+
+    // 時期簡介
+    window.ERA_DESCRIPTIONS = {
+      'era1': "【辛亥革命】革命黨人起義推翻滿清專制，清政府皇族內閣垂死掙扎。",
+      'era1_5': "【二次革命與護國戰爭】宋教仁被刺促發二次革命；袁世凱稱帝引發蔡鍔護國軍討袁。",
+      'era1_8': "【五四運動】巴黎和會外交失敗引發五四學潮，新青年提倡德先生與賽先生。",
+      'era2': "【北伐戰爭】國民革命軍誓師北伐，掃蕩北洋軍閥割據勢力。",
+      'era3': "【全面抗戰】七七事變國共第二次合作，國共兩黨正面與敵後雙戰場禦侮。",
+      'era4': "【國共內戰】抗戰勝利後和平談判破裂，三大會戰與劃時代政局轉折。"
+    };
+
+    // 隨機歷史環境事件
+    window.ERA_HISTORICAL_EVENTS = {
+      'era1': [
+        { title: "武昌起義烽火起", desc: "湖北新軍起義爆發，全國響應，軍事行動威力提升。", buffType: "military", val: 4, icon: "⚔️" },
+        { title: "保路風潮抗爭", desc: "川滇群眾保路抗爭牽制清軍，政治談判效果提升。", buffType: "politics", val: 3, icon: "📜" },
+        { title: "革命軍心高漲", desc: "各地響應獨立，民心士氣大振，思想動員效果提升。", buffType: "ideology", val: 3, icon: "💚" }
+      ],
+      'era1_5': [
+        { title: "刺宋案震驚全國", desc: "宋教仁遭遇暗殺爆發憲政危機，軍事打擊提升。", buffType: "military", val: 4, icon: "⚔️" },
+        { title: "護國誓師大會", desc: "蔡鍔雲南通電獨立發起討袁，思想號召力提升。", buffType: "ideology", val: 4, icon: "💚" }
+      ],
+      'era1_8': [
+        { title: "巴黎和會外交失敗", desc: "山東問題引發全民公憤，思想號召效果+5。", buffType: "ideology", val: 5, icon: "💚" },
+        { title: "三罷浪潮蔓延", desc: "罷課罷工罷市震撼當局，政治對峙能力提升。", buffType: "politics", val: 4, icon: "📜" }
+      ],
+      'era2': [
+        { title: "黃埔軍校出師", desc: "黃埔師生勇猛作戰，軍事打擊傷害+5。", buffType: "military", val: 5, icon: "⚔️" },
+        { title: "省港大罷工支援", desc: "工人階級大力支援北伐前線，政治條約防禦+4。", buffType: "politics", val: 4, icon: "📜" }
+      ],
+      'era3': [
+        { title: "抗日民族統一戰線", desc: "全國各界團結禦侮，思想士氣大振+5。", buffType: "ideology", val: 5, icon: "💚" },
+        { title: "正面戰場頑強抵抗", desc: "將士浴血守衛國土，政治條約護盾+4。", buffType: "politics", val: 4, icon: "📜" }
+      ],
+      'era4': [
+        { title: "重慶談判簽署雙十協定", desc: "爭取和平民主號召力，政治條約護盾+5。", buffType: "politics", val: 5, icon: "📜" },
+        { title: "三大會戰決戰爆發", desc: "主力對決兵力總動員，軍事打擊傷害+5。", buffType: "military", val: 5, icon: "⚔️" },
+        { title: "土地改革與民心向背", desc: "翻身農民踴躍參軍支援前線，思想民心+5。", buffType: "ideology", val: 5, icon: "💚" }
+      ]
+    };
+
+    // 各時期陣營資料
+    window.FACTION_DATA = {
+      'era1': {
+        factions: [
+          {
+            id: 'rev_party', name: '同盟會 / 革命黨', tag: '孫中山陣營', avatar: '☀️',
+            desc: "主張三民主義與武力推翻滿清專制，成立共和政府。",
+            isHistoricalWinner: true, enemyId: 'qing_gov',
+            skills: [
+              { name: "黃花崗起義", cost: 1, type: "ideology", val: 18, desc: "【思想】烈士壯烈犧牲喚醒民心覺醒，恢復 18 點民心。" },
+              { name: "武昌起義槍聲", cost: 1, type: "military", val: 32, desc: "【軍事】新軍響應起義爆發打擊，造成 32 點傷害。" },
+              { name: "同盟會宣言", cost: 1, type: "politics", polType: "shield", polHp: 18, desc: "【政治】驅除韃虜恢復中華，建立 18 點護盾陣地。" }
+            ]
+          },
+          {
+            id: 'qing_gov', name: '清朝政府', tag: '皇族內閣', avatar: '🐉',
+            desc: "滿清朝廷皇族內閣，企圖預防改革並維護專制皇權。",
+            isHistoricalWinner: false, enemyId: 'rev_party',
+            skills: [
+              { name: "皇族集權令", cost: 1, type: "politics", polType: "stun", polHp: 16, desc: "【政治】建立 16 點護盾，並限制敵方下一回合行動。" },
+              { name: "北洋新軍鎮壓", cost: 1, type: "military", val: 30, desc: "【軍事】調動馮國璋鎮壓武昌革命軍，造成 30 點打擊。" },
+              { name: "預備立憲詔書", cost: 1, type: "ideology", val: 18, desc: "【思想】宣佈實行立憲安撫民心，恢復 18 點民心。" }
+            ]
+          }
+        ]
+      },
+      'era1_5': {
+        factions: [
+          {
+            id: 'huguo_army', name: '蔡鍔護國軍 / 革命黨', tag: '蔡鍔陣營', avatar: '⚔️',
+            desc: "反對袁世凱專制稱帝，發起二次革命與護國戰爭討袁。",
+            isHistoricalWinner: true, enemyId: 'yuan_beiyang',
+            skills: [
+              { name: "雲南獨立通電", cost: 1, type: "politics", polType: "extraTurn", polHp: 10, desc: "【政治】宣告獨立，建立 10 點護盾並獲得連續行動機會！" },
+              { name: "川南瀘州血戰", cost: 1, type: "military", val: 32, desc: "【軍事】護國軍奮勇討袁攻勢，造成 32 點傷害。" },
+              { name: "誓師討袁檄文", cost: 1, type: "ideology", val: 18, desc: "【思想】號召全國維護共和，恢復 18 點民心。" }
+            ]
+          },
+          {
+            id: 'yuan_beiyang', name: '袁世凱 / 北洋政府', tag: '袁世凱陣營', avatar: '👑',
+            desc: "掌控北洋軍權，刺殺宋教仁並企圖稱帝建立中華帝國。",
+            isHistoricalWinner: false, enemyId: 'huguo_army',
+            skills: [
+              { name: "善後大借款", cost: 1, type: "politics", polType: "shield", polHp: 20, desc: "【政治】強行向五國銀行團借款，建立 20 點護盾。" },
+              { name: "北洋精銳南下", cost: 1, type: "military", val: 30, desc: "【軍事】派出段祺瑞精銳兵力鎮壓革命，造成 30 點傷害。" },
+              { name: "尊孔復古思潮", cost: 1, type: "ideology", val: 18, desc: "【思想】宣揚尊孔思想鞏固統治，恢復 18 點民心。" }
+            ]
+          }
+        ]
+      },
+      'era1_8': {
+        factions: [
+          {
+            id: 'may4th_students', name: '五四青年學生與知識份子', tag: '愛國學潮', avatar: '🎓',
+            desc: "提倡民主與科學，反對巴黎和會出賣山東主權。",
+            isHistoricalWinner: true, enemyId: 'duanjirui_beiyang',
+            skills: [
+              { name: "火燒趙家樓", cost: 1, type: "military", val: 30, desc: "【軍事】衝破軍警警備痛打國賊，造成 30 點傷害！" },
+              { name: "提倡德賽二先生", cost: 1, type: "ideology", val: 20, desc: "【思想】新文化運動思想啟蒙，恢復 20 點民心。" },
+              { name: "全國三罷總動員", cost: 1, type: "politics", polType: "stun", polHp: 12, desc: "【政治】罷課罷工罷市，建立 12 點護盾並封鎖對方行動！" }
+            ]
+          },
+          {
+            id: 'duanjirui_beiyang', name: '段祺瑞 / 安福國會', tag: '段祺瑞陣營', avatar: '🎩',
+            desc: "親日北洋政府，企圖武力鎮壓五四愛國運動。",
+            isHistoricalWinner: false, enemyId: 'may4th_students',
+            skills: [
+              { name: "軍警強行戒嚴", cost: 1, type: "politics", polType: "shield", polHp: 18, desc: "【政治】派出軍警封鎖學潮，建立 18 點防禦護盾。" },
+              { name: "逮捕愛國學生", cost: 1, type: "military", val: 28, desc: "【軍事】高壓手段逮捕遊行學生，造成 28 點傷害。" },
+              { name: "安福系新聞管制", cost: 1, type: "ideology", val: 16, desc: "【思想】封鎖新聞傳遞，恢復 16 點民心。" }
+            ]
+          }
+        ]
+      },
+      'era2': {
+        factions: [
+          {
+            id: 'nra_expedition', name: '國民革命軍 (北伐軍)', tag: '蔣介石陣營', avatar: '🚩',
+            desc: "黃埔建軍，實行國共合作，誓師北伐統一全國。",
+            isHistoricalWinner: true, enemyId: 'warlord_coalition',
+            skills: [
+              { name: "黃埔建軍協定", cost: 1, type: "politics", polType: "extraTurn", polHp: 12, desc: "【政治】建立革命武力，建立 12 點護盾並獲連續行動！" },
+              { name: "汀泗橋攻堅戰", cost: 1, type: "military", val: 34, desc: "【軍事】鐵軍獨立團血戰突破防線，造成 34 點傷害。" },
+              { name: "總動員打倒軍閥", cost: 1, type: "ideology", val: 18, desc: "【思想】宣揚三民主義，恢復 18 點民心士氣。" }
+            ]
+          },
+          {
+            id: 'warlord_coalition', name: '吳佩孚 / 孫傳芳軍閥聯軍', tag: '軍閥聯軍', avatar: '⚔️',
+            desc: "割據東南與中原各省的北洋軍閥勢力。",
+            isHistoricalWinner: false, enemyId: 'nra_expedition',
+            skills: [
+              { name: "軍閥要塞防線", cost: 1, type: "politics", polType: "shield", polHp: 20, desc: "【政治】憑藉武昌與南昌堅禦，建立 20 點護盾。" },
+              { name: "直系主力重炮", cost: 1, type: "military", val: 30, desc: "【軍事】調動直系精銳重炮反擊，造成 30 點傷害。" },
+              { name: "地方治安維穩", cost: 1, type: "ideology", val: 16, desc: "【思想】嚴懲動亂恢復秩序，恢復 16 點民心。" }
+            ]
+          }
+        ]
+      },
+      'era3': {
+        factions: [
+          {
+            id: 'kmt_national_army', name: '國民革命軍 (正面戰場)', tag: '正面戰場主導', avatar: '🛡️',
+            desc: "組織淞滬、台兒莊、長沙等重大會戰，堅守正面戰場抵抗日軍侵略。",
+            isHistoricalWinner: true, enemyId: 'japan_invaders',
+            skills: [
+              { name: "死守四行倉庫", cost: 1, type: "politics", polType: "shield", polHp: 22, desc: "【政治】八百壯士誓死孤軍堅守，建立 22 點高額護盾！" },
+              { name: "台兒莊近戰肉搏", cost: 1, type: "military", val: 34, desc: "【軍事】敢死隊發起夜襲肉搏大捷，造成 34 點傷害。" },
+              { name: "焦土抗戰誓言", cost: 1, type: "ideology", val: 18, desc: "【思想】地不分南北人不分老幼，恢復 18 點民心。" }
+            ]
+          },
+          {
+            id: 'ccp_eighth_route', name: '八路軍 / 新四軍 (敵後戰場)', tag: '敵後游擊主力', avatar: '⭐',
+            desc: "發動百團大戰與敵後游擊戰，建立抗日根據地，牽制大量日偽軍。",
+            isHistoricalWinner: true, enemyId: 'japan_invaders',
+            skills: [
+              { name: "百團大戰破襲", cost: 1, type: "military", val: 34, desc: "【軍事】破壞日軍交通線與據點，造成 34 點巨大打擊。" },
+              { name: "地道戰與游擊戰", cost: 1, type: "politics", polType: "shield", polHp: 20, desc: "【政治】依託敵後廣大群眾，建立 20 點防禦護盾。" },
+              { name: "減租減息政策", cost: 1, type: "ideology", val: 18, desc: "【思想】團結基層農民團結抗日，恢復 18 點民心。" }
+            ]
+          },
+          {
+            id: 'japan_invaders', name: '侵華日軍', tag: '法西斯侵略者', avatar: '⚔️',
+            desc: "發動全面侵華戰爭，實行狂妄戰略與高壓統治。",
+            isHistoricalWinner: false, enemyId: 'kmt_national_army',
+            skills: [
+              { name: "閃電突擊轟炸", cost: 1, type: "military", val: 32, desc: "【軍事】發動陸空聯合轟炸，造成 32 點傷害。" },
+              { name: "封鎖線與碉堡", cost: 1, type: "politics", polType: "shield", polHp: 18, desc: "【政治】修築封鎖溝與治安防線，建立 18 點護盾。" },
+              { name: "治安強化運動", cost: 1, type: "ideology", val: 16, desc: "【思想】實行高壓管治企圖維持後方，恢復 16 點民心。" }
+            ]
+          }
+        ]
+      },
+      'era4': {
+        factions: [
+          {
+            id: 'ccp_pla', name: '中國共產黨 / 人民解放軍', tag: '解放軍陣營', avatar: '⭐',
+            desc: "主張土地改革與農村包圍城市，發動三大會戰與渡江戰役。",
+            isHistoricalWinner: true, enemyId: 'kmt_gov',
+            skills: [
+              { name: "三大會戰決勝", cost: 1, type: "military", val: 36, desc: "【軍事】遼瀋、淮海、平津三大會戰決戰，造成 36 點強大傷害！" },
+              { name: "土地改革動員", cost: 1, type: "ideology", val: 22, desc: "【思想】耕者有其田獲得廣大農民擁護，恢復 22 點民心。" },
+              { name: "重慶談判爭取民主", cost: 1, type: "politics", polType: "shield", polHp: 20, desc: "【政治】簽署雙十協定爭取和平民主，建立 20 點護盾。" }
+            ]
+          },
+          {
+            id: 'kmt_gov', name: '中國國民黨 / 國民政府軍', tag: '國軍陣營', avatar: '☀️',
+            desc: "擁有美式裝備與大城市據點，試圖維持憲政統治並進行全面進攻。",
+            isHistoricalWinner: false, enemyId: 'ccp_pla',
+            skills: [
+              { name: "美援械裝重炮", cost: 1, type: "military", val: 34, desc: "【軍事】調動美械美裝精銳部隊轟炸，造成 34 點傷害。" },
+              { name: "行憲國大頒佈", cost: 1, type: "politics", polType: "shield", polHp: 20, desc: "【政治】召開國民大會頒布憲法，建立 20 點護盾陣地。" },
+              { name: "金圓券金融改革", cost: 1, type: "ideology", val: 16, desc: "【思想】進行幣制改革企圖穩定經濟，恢復 16 點民心。" }
+            ]
+          }
+        ]
+      }
+    };
+
+    // 結局資料
+    window.ENDINGS = {
+      'era1': {
+        win: { title: "帝制覆滅 · 共和誕生", desc: "革命黨人成功掀起辛亥革命風暴，結束了中國兩千多年的君主專制政體！", dseNote: "辛亥革命成功推翻清朝及君主專制，建立中華民國；但並未徹底改變中國半殖民地半封建的社會性質。" },
+        lose: { title: "專制固守 · 革命沉寂", desc: "清政府憑藉皇族內閣與軍警武力鎮壓了起義，專制皇權繼續維繫...", dseNote: "若清政府成功鎮壓起義，憲政改革失信於民的矛盾仍不可調和，革命風暴終將爆發。" }
+      },
+      'era1_5': {
+        win: { title: "護國討袁 · 捍衛共和", desc: "護國軍討袁獲得全國響應，袁世凱被迫取消洪憲帝制，成功捍衛了民國共和體制！", dseNote: "護國戰爭證明了民主共和觀念已深入人心，任何倒行逆施企圖復闢帝制者皆會遭到失敗。" },
+        lose: { title: "帝制稱雄 · 共和挫敗", desc: "北洋軍閥成功壓制了護國軍，帝制與強人專制進一步確立...", dseNote: "宋教仁被刺案與二次革命失敗，標誌著近代中國憲政民主嘗試遭遇重大挫折。" }
+      },
+      'era1_8': {
+        win: { title: "學生覺醒 · 拒簽和約", desc: "五四學潮震撼全國，北京政府被迫釋放被捕學生、罷免親日官員，並拒絕在巴黎和約上簽字！", dseNote: "五四運動是新民主主義革命的開端，展現了愛國知識份子與青年學生的偉大力量。" },
+        lose: { title: "外交失利 · 高壓戒嚴", desc: "北洋政府成功鐵腕壓制學潮，巴黎和會中國外交利益未能得到捍衛...", dseNote: "若五四運動失敗，將會進一步加劇中國社會的民族危機與思想禁錮。" }
+      },
+      'era2': {
+        win: { title: "掃蕩軍閥 · 全國統一", desc: "北伐軍連破吳佩孚、孫傳芳主力，成功消滅北洋軍閥，達成國家名義上的統一！", dseNote: "北伐戰爭基本推翻了北洋軍閥的統治，沉重打擊了帝國主義在華勢力。" },
+        lose: { title: "軍閥割據 · 武力守舊", desc: "軍閥聯軍成功封鎖了北伐軍的攻勢，南北軍閥割據局勢依舊持續...", dseNote: "若北伐失敗，中國將繼續陷入軍閥割據混戰、民不聊生的深淵。" }
+      },
+      'era3': {
+        win: { title: "全民族抗戰 · 偉大勝利", desc: "經過十四年艱苦卓絕的浴血奮戰，成功擊敗日本法西斯侵略者，贏得中國近代抗擊外侮的第一次完全勝利！", dseNote: "抗日戰爭勝利重新確立了中國在世界上的大國地位，開闢了中華民族偉大複興的光明前景。" },
+        lose: { title: "戰局沉陷 · 艱苦抗禦", desc: "侵略者攻勢推進，抵抗陣線陷入空前的嚴峻危機...", dseNote: "若正面戰場失守，將全盤考驗持久戰策略與敵後戰場的支撐能力。" }
+      },
+      'era4': {
+        win: { title: "劃時代劇變 · 新中國誕生", desc: "人民解放軍贏得三大會戰並發起渡江戰役，宣告國民政府統治終結，開啟了近代中國歷史的新篇章！", dseNote: "解放戰爭的勝利歸因於土地改革獲得民心支持、靈活的戰術指揮以及國民政府內部的經濟通貨膨脹與政治失能。" },
+        lose: { title: "划江而治 · 割據延續", desc: "國民政府軍憑藉美援裝備與大城市據點守住了長江防線...", dseNote: "若國共內戰形成僵局，中國將面臨長期划江而治與嚴重的政治經濟分割。" }
+      }
+    };
+
+    // 按特定類型獲取常規基礎牌
+    window.getBaseCardByType = function(type) {
+      const baseCards = [
+        { name: "軍事打擊", cost: 0, type: "military", val: 12, desc: "【軍事】調動常規部隊對敵方發動火力攻勢，造成 12 點傷害。" },
+        { name: "軍事重炮", cost: 0, type: "military", val: 15, desc: "【軍事】集中陣地火力精準打擊，造成 15 點傷害。" },
+        { name: "政治條約防線", cost: 0, type: "politics", polType: "shield", polHp: 14, desc: "【政治】場上建立 14 點護盾陣地，抵抗軍事攻擊。" },
+        { name: "限制通電", cost: 0, type: "politics", polType: "stun", polHp: 10, desc: "【政治】建立 10 點護盾，並封鎖對方下一回合行動！" },
+        { name: "連動決議", cost: 0, type: "politics", polType: "extraTurn", polHp: 8, desc: "【政治】建立 8 點護盾，並獲得連續出牌機會！" },
+        { name: "思想動員", cost: 0, type: "ideology", val: 10, desc: "【思想】發表演講聲援，恢復 10 點民心士氣。" },
+        { name: "民心重整", cost: 0, type: "ideology", val: 12, desc: "【思想】組織民眾支援後勤，恢復 12 點民心士氣。" }
+      ];
+      const filtered = baseCards.filter(c => c.type === type);
+      const picked = filtered[Math.floor(Math.random() * filtered.length)];
+      return { ...picked, isSkill: false };
+    };
+
+    // 獲取隨機專屬技能牌
+    window.getRandomSkillCard = function() {
+      if (window.gameState.playerFaction && window.gameState.playerFaction.skills) {
+        const skills = window.gameState.playerFaction.skills;
+        const picked = skills[Math.floor(Math.random() * skills.length)];
+        return { ...picked, isSkill: true };
+      }
+      return window.getBaseCardByType('military');
+    };
+
+    // 生成固定結構手牌：1張軍事常規 + 1張政治常規 + 1張思想常規 + 2張專屬技能牌
+    window.generateGuaranteedHand = function() {
+      const hand = [
+        window.getBaseCardByType('military'),
+        window.getBaseCardByType('politics'),
+        window.getBaseCardByType('ideology'),
+        window.getRandomSkillCard(),
+        window.getRandomSkillCard()
+      ];
+      for (let i = hand.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [hand[i], hand[j]] = [hand[j], hand[i]];
+      }
+      return hand;
+    };
+
+    // 選擇模式
+    window.chooseMode = function(mode) {
+      window.gameState.mode = mode;
+      document.getElementById('scene-mode-select').classList.add('hidden');
+      document.getElementById('btn-restart').classList.remove('hidden');
+
+      const modeLabel = document.getElementById('mode-label-tag');
+
+      if (mode === 'ai') {
+        document.getElementById('scene-faction-select').classList.remove('hidden');
+        document.getElementById('opponent-badge').innerText = "AI";
+        if (modeLabel) modeLabel.innerText = "單人模式 (VS AI)";
+        window.changeEra('era1');
+      } else {
+        document.getElementById('scene-pvp-lobby').classList.remove('hidden');
+        document.getElementById('opponent-badge').innerText = "玩家2";
+        if (modeLabel) modeLabel.innerText = "雙人線上對戰 (PVP)";
+        window.fetchRoomList();
+      }
+    };
+
+    window.showModeSelect = function() {
+      window.leaveCurrentRoom(); // 退出時清理雲端房間
+      document.getElementById('scene-pvp-lobby').classList.add('hidden');
+      document.getElementById('scene-faction-select').classList.add('hidden');
+      document.getElementById('scene-battle').classList.add('hidden');
+      document.getElementById('scene-mode-select').classList.remove('hidden');
+      document.getElementById('btn-restart').classList.add('hidden');
+    };
+
+    // 重置遊戲主介面
+    window.resetGame = function() {
+      window.gameState.isGameOver = false;
+      window.gameState.isReadyThisRound = false;
+      window.gameState.selectedCardIndex = null;
+      document.getElementById('modal-result').classList.add('hidden');
+      window.showModeSelect();
+    };
+
+    // 獲取房間列表
+    window.fetchRoomList = async function() {
+      const container = document.getElementById('room-list-container');
+      if (!container) return;
+
+      container.innerHTML = `<div class="text-center py-6 text-stone-500 text-xs"><i class="fa-solid fa-spinner fa-spin"></i> 正在載入歷史對戰房間...</div>`;
+
+      const db = window.firebaseDb;
+      if (!db || !window.firestore) {
+        container.innerHTML = `<div class="text-center py-4 text-amber-500 text-xs">請直接在上方輸入朋友給您的 6 位數房間邀請碼加入，或點擊下方按鈕建立全新房間。</div>`;
+        return;
+      }
+
+      try {
+        const { collection, getDocs } = window.firestore;
+        const colRef = collection(db, 'artifacts', window.appId, 'public', 'data', 'rooms');
+        const snapshot = await getDocs(colRef);
+
+        let html = '';
+        let count = 0;
+
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          if (data && data.status === 'waiting') {
+            count++;
+            html += `
+              <div class="bg-stone-900 border border-stone-800 hover:border-amber-500 rounded-xl p-3 flex justify-between items-center transition">
+                <div>
+                  <div class="flex items-center gap-2">
+                    <span class="font-bold text-amber-400 text-xs">房間 #${data.roomId}</span>
+                    <span class="text-[10px] bg-amber-950 text-amber-300 px-1.5 py-0.5 rounded border border-amber-800">${data.host?.name || '未知陣營'}</span>
+                  </div>
+                  <span class="text-[10px] text-stone-400">時期: ${window.ERA_DESCRIPTIONS[data.era]?.split('】')[0] + '】' || '未知時期'}</span>
+                </div>
+                <button onclick="window.joinRoom('${data.roomId}')" class="bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold px-3 py-1.5 rounded-lg text-xs transition">
+                  加入對決
+                </button>
+              </div>
+            `;
+          }
+        });
+
+        if (count === 0) {
+          container.innerHTML = `<div class="text-center py-6 text-stone-500 text-xs">目前暫無公開等待中的房間，您可以點擊下方建立全新房間！</div>`;
+        } else {
+          container.innerHTML = html;
+        }
+      } catch (err) {
+        console.warn("無法查詢公開房間列表:", err);
+        container.innerHTML = `<div class="text-center py-4 text-stone-400 text-xs">請輸入 6 位數邀請碼直接加入房間，或點擊下方按鈕建立房間。</div>`;
+      }
+    };
+
+    // 選擇/切換手牌
+    window.selectCard = function(index) {
+      if (window.gameState.mode === 'pvp' && window.gameState.isReadyThisRound) return;
+
+      if (window.gameState.selectedCardIndex === index) {
+        window.gameState.selectedCardIndex = null;
+      } else {
+        window.gameState.selectedCardIndex = index;
+      }
+      window.renderHand();
+    };
+
+    // 消耗能量重換手牌
+    window.redrawHand = function() {
+      if (window.gameState.isGameOver) return;
+      if (window.gameState.mode === 'pvp' && window.gameState.isReadyThisRound) return;
+
+      if (window.gameState.playerEnergy < 1) {
+        window.logMessage("歷史能量不足 1 點，無法重換手牌！");
+        return;
+      }
+
+      window.gameState.playerEnergy -= 1;
+      window.gameState.playerHand = window.generateGuaranteedHand();
+      window.gameState.selectedCardIndex = null;
+      window.updateUI();
+      window.renderHand();
+      window.logMessage("消耗 1 點能量，重新抽取了 5 張手牌！");
+    };
+
+    // 離開或刪除當前房間
+    window.leaveCurrentRoom = async function() {
+      if (window.gameState.roomUnsubscribe) {
+        window.gameState.roomUnsubscribe();
+        window.gameState.roomUnsubscribe = null;
+      }
+
+      if (window.gameState.roomId) {
+        const roomId = window.gameState.roomId;
+        window.gameState.roomId = null;
+
+        try {
+          const db = window.firebaseDb;
+          if (db && window.firestore) {
+            const { doc, deleteDoc } = window.firestore;
+            const roomRef = doc(db, 'artifacts', window.appId, 'public', 'data', 'rooms', roomId);
+            await deleteDoc(roomRef);
+            console.log(`[PVP] 房間 #${roomId} 已成功清理。`);
+          }
+        } catch (e) {
+          console.warn("清理房間失敗 (可能已關閉):", e);
+        }
+      }
+    };
+
+    // 一鍵清理所有舊/過期殘留房間
+    window.cleanupOldRooms = async function() {
+      await window.initFirebaseAuth();
+      const db = window.firebaseDb;
+      if (!db || !window.firestore) return;
+      const { collection, getDocs, deleteDoc } = window.firestore;
+
+      try {
+        const colRef = collection(db, 'artifacts', window.appId, 'public', 'data', 'rooms');
+        const snapshot = await getDocs(colRef);
+        let count = 0;
+        
+        const deletePromises = [];
+        snapshot.forEach((docSnap) => {
+          count++;
+          const ref = doc(db, 'artifacts', window.appId, 'public', 'data', 'rooms', docSnap.id);
+          deletePromises.push(deleteDoc(ref));
+        });
+
+        await Promise.all(deletePromises);
+        alert(`已成功清理 ${count} 個歷史殘留房間！現在列表乾淨了。`);
+        window.fetchRoomList();
+      } catch (err) {
+        console.error("清理殘留房間失敗:", err);
+        alert("清理房間時出錯，請刷新頁面再試。");
+      }
+    };
+
+    // 切換歷史時期
+    window.changeEra = function(eraKey) {
+      window.gameState.currentEra = eraKey;
+      document.querySelectorAll('.era-btn').forEach(btn => {
+        btn.className = "era-btn py-2.5 px-1 text-xs font-bold rounded-lg border border-stone-800 text-stone-400 hover:text-stone-200 transition text-center flex flex-col items-center justify-center min-h-[58px]";
+      });
+
+      const activeBtn = document.getElementById(`era-btn-${eraKey}`);
+      if (activeBtn) {
+        activeBtn.className = "era-btn py-2.5 px-1 text-xs font-bold rounded-lg border border-amber-500 bg-amber-900/40 text-amber-300 transition text-center flex flex-col items-center justify-center min-h-[58px]";
+      }
+
+      const descEl = document.getElementById('era-description');
+      if (descEl && window.ERA_DESCRIPTIONS[eraKey]) {
+        descEl.innerText = window.ERA_DESCRIPTIONS[eraKey];
+      }
+
+      window.renderFactionGrid();
+    };
+
+    // 渲染陣營列表
+    window.renderFactionGrid = function() {
+      const grid = document.getElementById('faction-grid');
+      if (!grid) return;
+      grid.innerHTML = '';
+
+      const eraData = window.FACTION_DATA[window.gameState.currentEra];
+      if (!eraData) return;
+
+      if (window.gameState.currentEra === 'era3') {
+        grid.className = "grid grid-cols-1 sm:grid-cols-3 gap-3 w-full max-w-4xl px-2";
+      } else {
+        grid.className = "grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-3xl px-2";
+      }
+
+      eraData.factions.forEach(faction => {
+        const card = document.createElement('div');
+        card.className = "bg-stone-900 border border-stone-800 hover:border-amber-500 rounded-xl p-4 cursor-pointer card-transition flex flex-col justify-between shadow-lg relative overflow-hidden group";
+        card.onclick = () => window.selectFaction(faction.id);
+
+        let skillBadges = faction.skills.map(s => `<span class="text-[9px] bg-stone-950 text-amber-300/90 px-1.5 py-0.5 rounded border border-stone-800">${s.name}</span>`).join(' ');
+
+        card.innerHTML = `
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center gap-2">
+                <span class="text-2xl">${faction.avatar}</span>
+                <div>
+                  <h4 class="font-serif-tc font-bold text-amber-400 text-sm md:text-base group-hover:text-amber-300 transition">${faction.name}</h4>
+                  <span class="text-[10px] bg-amber-950/80 text-amber-400 px-1.5 py-0.5 rounded border border-amber-800/60">${faction.tag}</span>
+                </div>
+              </div>
+            </div>
+            <p class="text-xs text-stone-400 mb-3 leading-relaxed">${faction.desc}</p>
+          </div>
+          <div>
+            <div class="text-[10px] text-stone-500 mb-1 font-bold">【專屬歷史事件技能卡】</div>
+            <div class="flex flex-wrap gap-1">${skillBadges}</div>
+          </div>
+        `;
+        grid.appendChild(card);
+      });
+    };
+
+    // 選擇陣營並進入遊戲 (單人 VS AI / PVP)
+    window.selectFaction = function(factionId) {
+      try {
+        const eraData = window.FACTION_DATA[window.gameState.currentEra];
+        if (!eraData) return;
+
+        const playerFaction = eraData.factions.find(f => f.id === factionId);
+        if (!playerFaction) return;
+
+        if (window.gameState.mode === 'pvp_create') {
+          window.createPvpRoomWithFaction(playerFaction);
+          return;
+        }
+
+        let enemyFaction = eraData.factions.find(f => f.id === playerFaction.enemyId);
+        if (!enemyFaction) {
+          enemyFaction = eraData.factions.find(f => f.id !== playerFaction.id);
+        }
+
+        window.gameState.playerFaction = playerFaction;
+        window.gameState.aiFaction = enemyFaction;
+
+        window.gameState.playerHp = 100;
+        window.gameState.aiHp = 100;
+        window.gameState.playerEnergy = 2;
+        window.gameState.playerPolitics = null;
+        window.gameState.aiPolitics = null;
+        window.gameState.isPlayerStunned = false;
+        window.gameState.isAiStunned = false;
+        window.gameState.round = 1;
+        window.gameState.isGameOver = false;
+
+        // UI 綁定
+        document.getElementById('player-name').innerText = playerFaction.name;
+        document.getElementById('player-avatar').innerText = playerFaction.avatar;
+        document.getElementById('player-faction-tag').innerText = playerFaction.tag;
+
+        document.getElementById('ai-name').innerText = enemyFaction.name;
+        document.getElementById('ai-avatar').innerText = enemyFaction.avatar;
+        document.getElementById('ai-faction-tag').innerText = enemyFaction.tag;
+
+        document.getElementById('battle-era-tag').innerText = window.ERA_DESCRIPTIONS[window.gameState.currentEra].split('】')[0] + '】';
+
+        // 嚴格從當前時期的歷史事件池中隨機抽取事件
+        const envs = window.ERA_HISTORICAL_EVENTS[window.gameState.currentEra];
+        if (envs && envs.length > 0) {
+          const currentEnv = envs[Math.floor(Math.random() * envs.length)];
+          window.gameState.currentEnvEvent = currentEnv;
+
+          document.getElementById('event-icon').innerText = currentEnv.icon;
+          document.getElementById('event-title').innerText = currentEnv.title;
+          document.getElementById('event-desc').innerText = currentEnv.desc;
+          document.getElementById('event-buff-tag').innerText = `效果提升 +${currentEnv.val}`;
+        }
+
+        // 初始化 5 張手牌 (1軍+1政+1思+2技能)
+        window.gameState.playerHand = window.generateGuaranteedHand();
+
+        document.getElementById('scene-faction-select').classList.add('hidden');
+        document.getElementById('scene-battle').classList.remove('hidden');
+        document.getElementById('btn-restart').classList.remove('hidden');
+
+        window.updateUI();
+        window.renderHand();
+        window.logMessage("對決開始！請選擇手牌打出。");
+      } catch (e) {
+        console.error("選擇陣營出錯:", e);
+        alert("進入陣營時發生異常，請重試！");
+      }
+    };
+
+    // PVP 雲端對戰邏輯
+    window.openCreateRoomModal = function() {
+      window.gameState.mode = 'pvp_create';
+      document.getElementById('scene-pvp-lobby').classList.add('hidden');
+      document.getElementById('scene-faction-select').classList.remove('hidden');
+      window.changeEra('era1');
+    };
+
+    window.createPvpRoomWithFaction = async function(faction) {
+      const roomId = Math.floor(100000 + Math.random() * 900000).toString();
+      window.gameState.roomId = roomId;
+      window.gameState.playerRole = 'host';
+      window.gameState.playerFaction = faction;
+      window.gameState.resolvedPvpRound = 0;
+      window.gameState.playerHp = 100;
+      window.gameState.aiHp = 100;
+
+      const envs = window.ERA_HISTORICAL_EVENTS[window.gameState.currentEra];
+      const currentEnv = envs[Math.floor(Math.random() * envs.length)];
+      window.gameState.currentEnvEvent = currentEnv;
+
+      const roomData = {
+        roomId: roomId,
+        era: window.gameState.currentEra,
+        env: currentEnv,
+        status: 'waiting',
+        round: 1,
+        updatedAt: Date.now(),
+        host: {
+          id: faction.id,
+          name: faction.name,
+          avatar: faction.avatar,
+          tag: faction.tag,
+          enemyId: faction.enemyId,
+          hp: 100,
+          energy: 2,
+          politics: null,
+          chosenCard: null,
+          isReady: false
+        },
+        guest: null,
+        lastAction: '房間已建立，等待對手輸入 6 位數邀請碼加入...'
+      };
+
+      window.gameState.pvpRoomData = roomData;
+
+      // 1. 初始化 PeerJS
+      window.peerEngine.initHost(roomId, (remoteData) => {
+        const currentData = window.gameState.pvpRoomData;
+        if (!currentData) return;
+
+        if (remoteData.type === 'GUEST_JOIN') {
+          currentData.status = 'playing';
+          currentData.guest = remoteData.guest;
+          currentData.lastAction = `${remoteData.guest.name} 已成功進入房間！`;
+          currentData.updatedAt = Date.now();
+          window.peerEngine.send({ type: 'SYNC_STATE', data: currentData });
+          window.publicRelay.postState(roomId, currentData);
+          if (window.handlePvpSyncData) window.handlePvpSyncData(currentData);
+        } else if (remoteData.type === 'GUEST_PLAY_CARD') {
+          if (currentData.guest) {
+            currentData.guest.isReady = true;
+            currentData.guest.chosenCard = remoteData.chosenCard;
+            if (remoteData.isStunned) currentData.host.isStunned = true;
+          }
+          currentData.updatedAt = Date.now();
+          window.peerEngine.send({ type: 'SYNC_STATE', data: currentData });
+          window.publicRelay.postState(roomId, currentData);
+          if (window.handlePvpSyncData) window.handlePvpSyncData(currentData);
+        }
+      });
+
+      // 2. 寫入公開廣播信令
+      await window.publicRelay.postState(roomId, roomData);
+
+      window.gameState.mode = 'pvp';
+      window.startPvpRoomListener(roomId);
+    };
+
+    window.joinRoomById = function() {
+      const input = document.getElementById('input-room-id').value.trim();
+      if (input.length === 6) {
+        window.joinRoom(input);
+      } else {
+        alert("請輸入正確的 6 位數房間邀請碼！");
+      }
+    };
+
+    window.joinRoom = async function(roomId) {
+      window.gameState.roomId = roomId;
+      window.gameState.playerRole = 'guest';
+      window.gameState.resolvedPvpRound = 0;
+      window.gameState.playerHp = 100;
+      window.gameState.aiHp = 100;
+
+      // 讀取房間資料
+      let roomData = await window.publicRelay.getState(roomId);
+
+      const eraKey = (roomData && roomData.era) ? roomData.era : (window.gameState.currentEra || 'era1');
+      window.gameState.currentEra = eraKey;
+
+      const eraFactions = window.FACTION_DATA[eraKey].factions;
+      let guestFaction = null;
+
+      // 【關鍵修復】與單人模式一致分配陣營：根據房主的敵對 ID 找到對應的陣營
+      if (roomData && roomData.host) {
+        if (roomData.host.enemyId) {
+          guestFaction = eraFactions.find(f => f.id === roomData.host.enemyId);
+        }
+        if (!guestFaction) {
+          guestFaction = eraFactions.find(f => f.id !== roomData.host.id);
+        }
+      }
+      if (!guestFaction) guestFaction = eraFactions[1] || eraFactions[0];
+
+      window.gameState.playerFaction = guestFaction;
+
+      const guestObj = {
+        id: guestFaction.id,
+        name: guestFaction.name,
+        avatar: guestFaction.avatar,
+        tag: guestFaction.tag,
+        enemyId: guestFaction.enemyId,
+        hp: 100,
+        energy: 2,
+        politics: null,
+        chosenCard: null,
+        isReady: false
+      };
+
+      // 如果已有歷史資料，更新 state
+      if (roomData) {
+        roomData.status = 'playing';
+        roomData.guest = guestObj;
+        roomData.lastAction = `${guestFaction.name} 已成功加入對決！`;
+        roomData.updatedAt = Date.now();
+        await window.publicRelay.postState(roomId, roomData);
+      }
+
+      // 同時發送 Peer 訊號
+      window.onPeerConnected = () => {
+        window.peerEngine.send({
+          type: 'GUEST_JOIN',
+          guest: guestObj
+        });
+      };
+
+      window.peerEngine.connectToHost(roomId, (remoteData) => {
+        if (remoteData.type === 'SYNC_STATE') {
+          if (window.handlePvpSyncData) window.handlePvpSyncData(remoteData.data);
+        }
+      });
+
+      window.gameState.mode = 'pvp';
+      window.startPvpRoomListener(roomId);
+
+      // 觸發一次狀態更新
+      if (roomData) window.handlePvpSyncData(roomData);
+    };
+
+    window.startPvpRoomListener = function(roomId) {
+      document.getElementById('scene-pvp-lobby').classList.add('hidden');
+      document.getElementById('scene-faction-select').classList.add('hidden');
+      document.getElementById('scene-battle').classList.remove('hidden');
+      document.getElementById('btn-restart').classList.remove('hidden');
+
+      document.getElementById('pvp-room-code-tag').innerText = `房間號: ${roomId}`;
+      document.getElementById('pvp-room-code-tag').classList.remove('hidden');
+      document.getElementById('pvp-readiness-indicator').classList.remove('hidden');
+
+      if (window.gameState.playerFaction) {
+        document.getElementById('player-name').innerText = window.gameState.playerFaction.name;
+        document.getElementById('player-avatar').innerText = window.gameState.playerFaction.avatar;
+        document.getElementById('player-faction-tag').innerText = window.gameState.playerFaction.tag;
+      }
+
+      window.gameState.playerHand = window.generateGuaranteedHand();
+
+      // 啟動定時輪詢監聽（保障跨區域/GitHub Pages 上 100% 同步）
+      if (window.publicRelay.interval) clearInterval(window.publicRelay.interval);
+      window.publicRelay.interval = setInterval(async () => {
+        if (window.gameState.isGameOver || window.gameState.mode !== 'pvp') {
+          clearInterval(window.publicRelay.interval);
+          return;
+        }
+        const latestData = await window.publicRelay.getState(roomId);
+        if (latestData && window.handlePvpSyncData) {
+          window.handlePvpSyncData(latestData);
+        }
+      }, 1000);
+
+      // 統一狀態同步處理核心
+      window.handlePvpSyncData = async (data) => {
+        if (!data || window.gameState.isGameOver) return;
+
+        // 【關鍵修復】防覆蓋機制：如果收到的數據時間戳比本地更新還舊，無視過時舊 state，防止狀態回復/回血
+        if (data.updatedAt && window.gameState.lastStateTime && data.updatedAt < window.gameState.lastStateTime) {
+          return;
+        }
+        if (data.updatedAt) window.gameState.lastStateTime = data.updatedAt;
+
+        window.gameState.pvpRoomData = data;
+
+        const isHost = window.gameState.playerRole === 'host';
+        const myData = isHost ? data.host : data.guest;
+        const oppData = isHost ? data.guest : data.host;
+
+        if (data.round) window.gameState.round = data.round;
+
+        if (data.env) {
+          window.gameState.currentEnvEvent = data.env;
+          document.getElementById('event-icon').innerText = data.env.icon;
+          document.getElementById('event-title').innerText = data.env.title;
+          document.getElementById('event-desc').innerText = data.env.desc;
+          document.getElementById('event-buff-tag').innerText = `效果提升 +${data.env.val}`;
+        }
+
+        if (oppData) {
+          document.getElementById('ai-name').innerText = oppData.name;
+          document.getElementById('ai-avatar').innerText = oppData.avatar;
+          document.getElementById('ai-faction-tag').innerText = oppData.tag;
+        }
+
+        if (data.status === 'waiting') {
+          window.logMessage("等待對手輸入 6 位數邀請碼連線中...");
+          return;
+        }
+
+        // 強制保持我方已鎖定狀態
+        const isIReady = window.gameState.isReadyThisRound || (myData && myData.isReady);
+        const isOppReady = oppData && oppData.isReady;
+
+        const myReadyIcon = isIReady ? '<i class="fa-solid fa-check-circle text-green-400"></i> 我方：已鎖定出牌' : '<i class="fa-solid fa-spinner fa-spin text-amber-400"></i> 我方：思考中';
+        const oppReadyIcon = isOppReady ? '<i class="fa-solid fa-check-circle text-green-400"></i> 對方：已鎖定出牌' : '<i class="fa-solid fa-spinner fa-spin text-amber-400"></i> 對方：思考中';
+        document.getElementById('p1-ready-status').innerHTML = myReadyIcon;
+        document.getElementById('p2-ready-status').innerHTML = oppReadyIcon;
+
+        // 雙方同時鎖定後的同步結算
+        if ((data.host && data.host.isReady) && (data.guest && data.guest.isReady) && window.gameState.resolvedPvpRound < data.round) {
+          window.gameState.resolvedPvpRound = data.round;
+          window.logMessage("⚔️ 雙方均已確定出牌！開始同步結算本輪對決效果...");
+
+          const hostCard = data.host.chosenCard;
+          const guestCard = data.guest.chosenCard;
+
+          const myCard = isHost ? hostCard : guestCard;
+          const oppCard = isHost ? guestCard : hostCard;
+
+          const amIStunned = myData && myData.isStunned;
+          const isOppStunned = oppData && oppData.isStunned;
+
+          if (myCard && !amIStunned) window.executeCardEffect(myCard, 'player');
+          if (oppCard && !isOppStunned) window.executeCardEffect(oppCard, 'ai');
+
+          if (amIStunned) window.logMessage("⚠️ 你本回合受政治協定限制，無法行動！");
+          if (isOppStunned) window.logMessage("✨ 對方本回合受政治協定限制，行動被封鎖！");
+
+          window.updateUI();
+
+          if (isHost) {
+            setTimeout(async () => {
+              if (window.gameState.isGameOver) return;
+              const newRound = data.round + 1;
+              data.round = newRound;
+              data.updatedAt = Date.now();
+              data.host.isReady = false;
+              data.host.chosenCard = null;
+              data.host.isStunned = false;
+              data.host.energy = Math.min(3, data.host.energy + 1);
+
+              // 【關鍵修復】嚴格維護當前實時血量與政治卡，禁止無故自動回復狀態！
+              data.host.hp = window.gameState.playerHp;
+              data.host.politics = window.gameState.playerPolitics;
+
+              data.guest.isReady = false;
+              data.guest.chosenCard = null;
+              data.guest.isStunned = false;
+              data.guest.energy = Math.min(3, data.guest.energy + 1);
+              data.guest.hp = window.gameState.aiHp;
+              data.guest.politics = window.gameState.aiPolitics;
+              data.lastAction = `第 ${newRound} 回合開始！請選擇本輪手牌打出。`;
+
+              window.peerEngine.send({ type: 'SYNC_STATE', data: data });
+              await window.publicRelay.postState(roomId, data);
+              window.handlePvpSyncData(data);
+            }, 1200);
+          }
+
+          window.gameState.isReadyThisRound = false;
+          return;
+        }
+
+        if (data.lastAction) window.logMessage(data.lastAction);
+
+        // 【關鍵修復】只在並未本地結算時同步對方實施的效果，防範血量覆蓋
+        if (myData && !window.gameState.isReadyThisRound) {
+          window.gameState.playerHp = myData.hp;
+          window.gameState.playerEnergy = myData.energy;
+          window.gameState.playerPolitics = myData.politics;
+        }
+
+        if (oppData && !window.gameState.isReadyThisRound) {
+          window.gameState.aiHp = oppData.hp;
+          window.gameState.aiPolitics = oppData.politics;
+        }
+
+        window.updateUI();
+        window.renderHand();
+
+        if (myData && oppData && (myData.hp <= 0 || oppData.hp <= 0)) {
+          if (!window.gameState.isGameOver) {
+            window.gameState.isGameOver = true;
+            setTimeout(() => window.showGameResult(), 400);
+          }
+        }
+      };
+    };
+
+    // 打出/鎖定卡牌
+    window.playSelectedCard = async function() {
+      if (window.gameState.selectedCardIndex === null || window.gameState.isGameOver) return;
+
+      const card = window.gameState.playerHand[window.gameState.selectedCardIndex];
+      if (!card) return;
+
+      if (card.cost > 0 && window.gameState.playerEnergy < card.cost) {
+        window.logMessage("歷史能量不足，無法打出此技能牌！");
+        return;
+      }
+
+      if (window.gameState.mode === 'pvp') {
+        if (window.gameState.isReadyThisRound) return;
+
+        if (card.type === 'politics' && card.polType === 'extraTurn' && !window.gameState.pvpExtraTurnCard) {
+          if (card.cost > 0) window.gameState.playerEnergy -= card.cost;
+          
+          window.executeCardEffect(card, 'player');
+          window.gameState.pvpExtraTurnCard = card;
+          window.gameState.playerHand.splice(window.gameState.selectedCardIndex, 1);
+          window.gameState.selectedCardIndex = null;
+
+          if (window.gameState.playerHand.length <= 1) {
+            window.gameState.playerHand = window.generateGuaranteedHand();
+          }
+
+          window.updateUI();
+          window.renderHand();
+          window.logMessage(`✨ 觸發${card.name}！獲得 ${card.polHp} 點護盾與額外行動機會，請選擇第二張卡牌打出！`);
+          return;
+        }
+
+        if (card.cost > 0) window.gameState.playerEnergy -= card.cost;
+        
+        // 本地立即設為鎖定，防止輪詢干擾
+        window.gameState.isReadyThisRound = true;
+
+        let finalPlayedCard = card;
+        if (window.gameState.pvpExtraTurnCard) {
+          finalPlayedCard = {
+            isCombo: true,
+            card1: window.gameState.pvpExtraTurnCard,
+            card2: card,
+            name: `${window.gameState.pvpExtraTurnCard.name} + ${card.name}`
+          };
+          window.gameState.pvpExtraTurnCard = null;
+        }
+
+        window.gameState.playerHand.splice(window.gameState.selectedCardIndex, 1);
+        window.gameState.selectedCardIndex = null;
+
+        if (window.gameState.playerHand.length <= 1) {
+          window.gameState.playerHand = window.generateGuaranteedHand();
+        }
+
+        window.renderHand();
+
+        const isHost = window.gameState.playerRole === 'host';
+        const hasStun = (card.type === 'politics' && card.polType === 'stun') ||
+                        (finalPlayedCard.isCombo && (finalPlayedCard.card1.polType === 'stun' || finalPlayedCard.card2.polType === 'stun'));
+
+        const roomId = window.gameState.roomId;
+        const now = Date.now();
+        window.gameState.lastStateTime = now;
+
+        const currentData = window.gameState.pvpRoomData || {};
+        currentData.updatedAt = now;
+
+        if (isHost) {
+          if (!currentData.host) currentData.host = {};
+          currentData.host.isReady = true;
+          currentData.host.chosenCard = finalPlayedCard;
+          if (hasStun && currentData.guest) currentData.guest.isStunned = true;
+          
+          window.peerEngine.send({ type: 'SYNC_STATE', data: currentData });
+          await window.publicRelay.postState(roomId, currentData);
+          window.handlePvpSyncData(currentData);
+        } else {
+          if (!currentData.guest) currentData.guest = {};
+          currentData.guest.isReady = true;
+          currentData.guest.chosenCard = finalPlayedCard;
+          if (hasStun && currentData.host) currentData.host.isStunned = true;
+
+          window.peerEngine.send({
+            type: 'GUEST_PLAY_CARD',
+            chosenCard: finalPlayedCard,
+            isStunned: hasStun
+          });
+          
+          await window.publicRelay.postState(roomId, currentData);
+          window.handlePvpSyncData(currentData);
+        }
+        return;
+      }
+
+      if (card.cost > 0) window.gameState.playerEnergy -= card.cost;
+
+      window.gameState.playerHand.splice(window.gameState.selectedCardIndex, 1);
+      window.gameState.selectedCardIndex = null;
+
+      window.executeCardEffect(card, 'player');
+
+      if (window.gameState.playerHand.length <= 1) {
+        window.gameState.playerHand = window.generateGuaranteedHand();
+        window.logMessage("手牌不足，自動補充 5 張手牌（1軍+1政+1思+2技能）！");
+      }
+
+      window.updateUI();
+      window.renderHand();
+
+      if (window.checkGameOver()) return;
+
+      if (window.gameState.hasExtraTurn) {
+        window.gameState.hasExtraTurn = false;
+        window.logMessage("✨ 發動政治連動決議！獲得額外行動機會，請繼續出牌！");
+      } else {
+        setTimeout(() => window.aiTurn(), 800);
+      }
+    };
+
+    // 渲染手牌
+    window.renderHand = function() {
+      const container = document.getElementById('player-hand');
+      if (!container) return;
+      container.innerHTML = '';
+
+      const isPvpLocked = window.gameState.mode === 'pvp' && window.gameState.isReadyThisRound;
+
+      window.gameState.playerHand.forEach((card, index) => {
+        const isSelected = window.gameState.selectedCardIndex === index;
+        const cardEl = document.createElement('div');
+
+        let borderStyle = isSelected ? "border-amber-400 bg-amber-950/60 ring-2 ring-amber-400" : "border-stone-800 bg-stone-900/90 hover:border-amber-600/70";
+        let typeColor = "text-amber-400";
+        let typeBg = "bg-stone-800";
+        
+        if (card.type === 'military') { typeColor = "text-red-400"; typeBg = "bg-red-950/80 border-red-800"; }
+        else if (card.type === 'politics') { typeColor = "text-blue-400"; typeBg = "bg-blue-950/80 border-blue-800"; }
+        else if (card.type === 'ideology') { typeColor = "text-emerald-400"; typeBg = "bg-emerald-950/80 border-emerald-800"; }
+
+        cardEl.className = `min-w-[130px] md:min-w-[145px] p-2.5 rounded-xl border ${borderStyle} cursor-pointer card-transition flex flex-col justify-between select-none snap-start shadow-md relative overflow-hidden`;
+        if (!isPvpLocked) cardEl.onclick = () => window.selectCard(index);
+
+        cardEl.innerHTML = `
+          <div>
+            <div class="flex justify-between items-start mb-1">
+              <span class="text-[9px] px-1.5 py-0.5 rounded border font-bold ${typeColor} ${typeBg}">${card.isSkill ? '⚡ 技能牌' : '常規牌'}</span>
+              ${card.cost > 0 ? `<span class="text-[10px] font-bold text-amber-300 bg-amber-950 border border-amber-800 px-1 rounded">⚡1</span>` : ''}
+            </div>
+            <h4 class="font-serif-tc font-bold text-xs md:text-sm text-stone-200 mb-1 truncate">${card.name}</h4>
+            <p class="text-[10px] text-stone-400 leading-tight mb-2">${card.desc}</p>
+          </div>
+        `;
+        container.appendChild(cardEl);
+      });
+
+      const playBtn = document.getElementById('btn-play-card');
+      if (isPvpLocked) {
+        playBtn.disabled = true;
+        playBtn.innerHTML = `<i class="fa-solid fa-lock"></i> 已鎖定，等待對方...`;
+      } else {
+        playBtn.disabled = (window.gameState.selectedCardIndex === null);
+        playBtn.innerHTML = `<i class="fa-solid fa-paper-plane"></i> 打出卡牌`;
+      }
+    };
+
+    // 浮動數字特效
+    window.spawnFloatText = function(containerId, text, colorClass) {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      const pop = document.createElement('div');
+      pop.className = `damage-pop ${colorClass}`;
+      pop.innerText = text;
+      pop.style.left = '50%';
+      pop.style.top = '30%';
+      container.appendChild(pop);
+      setTimeout(() => pop.remove(), 900);
+    };
+
+    // 更新介面 UI
+    window.updateUI = function() {
+      const pHpPct = Math.max(0, Math.min(100, window.gameState.playerHp));
+      const aHpPct = Math.max(0, Math.min(100, window.gameState.aiHp));
+
+      document.getElementById('player-hp-bar').style.width = `${pHpPct}%`;
+      document.getElementById('player-hp-text').innerText = `${Math.max(0, Math.round(window.gameState.playerHp))} / 100`;
+
+      document.getElementById('ai-hp-bar').style.width = `${aHpPct}%`;
+      document.getElementById('ai-hp-text').innerText = `${Math.max(0, Math.round(window.gameState.aiHp))} / 100`;
+
+      document.getElementById('player-energy-text').innerText = `${window.gameState.playerEnergy}/${window.gameState.maxEnergy}`;
+      document.getElementById('round-counter').innerText = `第 ${window.gameState.round} 回合`;
+
+      const pZone = document.getElementById('player-politics-zone');
+      if (window.gameState.playerPolitics && window.gameState.playerPolitics.hp > 0) {
+        pZone.classList.remove('hidden');
+        document.getElementById('player-politics-name').innerText = window.gameState.playerPolitics.name;
+        document.getElementById('player-politics-hp').innerText = window.gameState.playerPolitics.hp;
+      } else {
+        pZone.classList.add('hidden');
+        window.gameState.playerPolitics = null;
+      }
+
+      const aZone = document.getElementById('ai-politics-zone');
+      const targetBox = document.getElementById('target-select-box');
+
+      if (window.gameState.aiPolitics && window.gameState.aiPolitics.hp > 0) {
+        aZone.classList.remove('hidden');
+        document.getElementById('ai-politics-name').innerText = window.gameState.aiPolitics.name;
+        document.getElementById('ai-politics-hp').innerText = window.gameState.aiPolitics.hp;
+        targetBox.classList.remove('hidden');
+      } else {
+        aZone.classList.add('hidden');
+        targetBox.classList.add('hidden');
+        window.gameState.aiPolitics = null;
+      }
+    };
+
+    // 執行卡牌效果
+    window.executeCardEffect = function(card, source) {
+      if (card && card.isCombo) {
+        window.executeCardEffect(card.card1, source);
+        window.executeCardEffect(card.card2, source);
+        return;
+      }
+
+      const isPlayer = source === 'player';
+      const env = window.gameState.currentEnvEvent;
+      let envBonus = (env && env.buffType === card.type) ? env.val : 0;
+
+      const targetBox = isPlayer ? 'ai-info-box' : 'player-info-box';
+
+      if (card.type === 'military') {
+        let damage = card.val + envBonus;
+        const attackTarget = isPlayer ? document.querySelector('input[name="attack-target"]:checked')?.value : 'boss';
+
+        if (attackTarget === 'politics' && (isPlayer ? window.gameState.aiPolitics : window.gameState.playerPolitics)) {
+          if (isPlayer) {
+            window.gameState.aiPolitics.hp -= damage;
+            if (window.gameState.aiPolitics.hp <= 0) window.gameState.aiPolitics = null;
+          } else {
+            window.gameState.playerPolitics.hp -= damage;
+            if (window.gameState.playerPolitics.hp <= 0) window.gameState.playerPolitics = null;
+          }
+          window.spawnFloatText(targetBox, `-${damage} 陣地拆除`, "text-blue-400");
+        } else {
+          let pol = isPlayer ? window.gameState.aiPolitics : window.gameState.playerPolitics;
+          if (pol && pol.hp > 0) {
+            if (pol.hp >= damage) {
+              pol.hp -= damage;
+              damage = 0;
+            } else {
+              damage -= pol.hp;
+              pol.hp = 0;
+            }
+          }
+          if (isPlayer) {
+            window.gameState.aiHp -= damage;
+          } else {
+            window.gameState.playerHp -= damage;
+          }
+          window.spawnFloatText(targetBox, `-${damage}`, "text-red-500");
+          document.getElementById(targetBox).classList.add('anim-hit', 'anim-shake');
+          setTimeout(() => document.getElementById(targetBox).classList.remove('anim-hit', 'anim-shake'), 500);
+        }
+      } else if (card.type === 'ideology') {
+        let heal = card.val + envBonus;
+        if (isPlayer) {
+          window.gameState.playerHp = Math.min(100, window.gameState.playerHp + heal);
+          window.spawnFloatText('player-info-box', `+${heal}`, "text-green-400");
+        } else {
+          window.gameState.aiHp = Math.min(100, window.gameState.aiHp + heal);
+          window.spawnFloatText('ai-info-box', `+${heal}`, "text-green-400");
+        }
+      } else if (card.type === 'politics') {
+        let polHp = card.polHp + envBonus;
+        const polData = { name: card.name, hp: polHp, type: card.polType };
+        if (isPlayer) {
+          window.gameState.playerPolitics = polData;
+          if (card.polType === 'extraTurn') window.gameState.hasExtraTurn = true;
+          if (card.polType === 'stun') window.gameState.isAiStunned = true;
+          window.spawnFloatText('player-info-box', `+${polHp} 條約`, "text-blue-300");
+        } else {
+          window.gameState.aiPolitics = polData;
+          if (card.polType === 'stun') window.gameState.isPlayerStunned = true;
+          window.spawnFloatText('ai-info-box', `+${polHp} 條約`, "text-blue-300");
+        }
+      }
+    };
+
+    // AI 行動回合
+    window.aiTurn = function() {
+      if (window.gameState.isGameOver) return;
+
+      if (window.gameState.isAiStunned) {
+        window.gameState.isAiStunned = false;
+        window.logMessage("敵方受政治協定限制，本回合無法行動！");
+        window.endRound();
+        return;
+      }
+
+      const skills = window.gameState.aiFaction.skills || [];
+      let possibleCards = [
+        { name: "軍事鎮壓", type: "military", val: 12 },
+        { name: "政治條約", type: "politics", polType: "shield", polHp: 12 },
+        { name: "宣傳安撫", type: "ideology", val: 10 },
+        ...skills
+      ];
+
+      if (window.gameState.aiHp > 85) {
+        possibleCards = possibleCards.filter(c => c.type !== 'ideology');
+      }
+
+      const chosenCard = possibleCards[Math.floor(Math.random() * possibleCards.length)];
+      window.logMessage(`敵方打出了【${chosenCard.name}】！`);
+
+      window.executeCardEffect(chosenCard, 'ai');
+      window.updateUI();
+
+      if (window.checkGameOver()) return;
+
+      window.endRound();
+    };
+
+    // 回合結束恢復
+    window.endRound = function() {
+      window.gameState.round += 1;
+      window.gameState.playerEnergy = Math.min(window.gameState.maxEnergy, window.gameState.playerEnergy + 1);
+      window.updateUI();
+    };
+
+    // 檢查勝負
+    window.checkGameOver = function() {
+      if (window.gameState.playerHp <= 0 || window.gameState.aiHp <= 0) {
+        window.gameState.isGameOver = true;
+        setTimeout(() => window.showGameResult(), 600);
+        return true;
+      }
+      return false;
+    };
+
+    // 顯示戰鬥結果與 DSE 結算解析
+    window.showGameResult = function() {
+      const modal = document.getElementById('modal-result');
+      if (modal && !modal.classList.contains('hidden')) return;
+
+      if (window.gameState.roomUnsubscribe) {
+        try {
+          window.gameState.roomUnsubscribe();
+        } catch(e) {}
+        window.gameState.roomUnsubscribe = null;
+      }
+
+      window.gameState.isGameOver = true;
+
+      const eraEnding = window.ENDINGS[window.gameState.currentEra];
+      if (!eraEnding) return;
+
+      let myFaction = window.gameState.playerFaction;
+      let oppFaction = window.gameState.aiFaction;
+
+      if (!oppFaction && myFaction && window.FACTION_DATA[window.gameState.currentEra]) {
+        const eraFactions = window.FACTION_DATA[window.gameState.currentEra].factions;
+        oppFaction = eraFactions.find(f => f.id !== myFaction.id) || eraFactions[0];
+      }
+
+      let isIWin = window.gameState.playerHp > 0;
+      let winningFaction = isIWin ? myFaction : oppFaction;
+
+      if (!winningFaction) {
+        winningFaction = myFaction || { name: '對戰陣營', isHistoricalWinner: true };
+      }
+
+      const isTrueHistory = Boolean(winningFaction.isHistoricalWinner);
+      const endingData = isTrueHistory ? eraEnding.win : eraEnding.lose;
+
+      document.getElementById('result-icon').innerText = isIWin ? "🏆" : "📜";
+      document.getElementById('result-title').innerText = `${winningFaction.name}：${endingData.title}`;
+
+      const resultTypeEl = document.getElementById('result-type');
+      if (isTrueHistory) {
+        resultTypeEl.innerText = `【 史實結局 - ${winningFaction.name}獲勝 (符合歷史發展) 】`;
+        resultTypeEl.className = "text-xs font-bold uppercase tracking-widest mb-4 text-emerald-400";
+      } else {
+        resultTypeEl.innerText = `【 平行時空 / 改寫歷史 - ${winningFaction.name}獲勝 】`;
+        resultTypeEl.className = "text-xs font-bold uppercase tracking-widest mb-4 text-amber-400";
+      }
+
+      document.getElementById('result-description').innerText = endingData.desc;
+      document.getElementById('result-dse-note').innerHTML = `<i class="fa-solid fa-graduation-cap"></i> <strong>DSE 中史核心考點解析：</strong> ${endingData.dseNote}`;
+
+      modal.classList.remove('hidden');
+    };
+
+    // 記錄訊息
+    window.logMessage = function(msg) {
+      const el = document.getElementById('battle-log');
+      if (el) el.innerText = msg;
+    };
+
+    // 綁定玩法說明事件
+    window.onload = function() {
+      const btnRules = document.getElementById('btn-rules');
+      const btnCloseRules = document.getElementById('btn-close-rules');
+      const modalRules = document.getElementById('modal-rules');
+
+      if (btnRules && modalRules) {
+        btnRules.onclick = () => modalRules.classList.remove('hidden');
+      }
+      if (btnCloseRules && modalRules) {
+        btnCloseRules.onclick = () => modalRules.classList.add('hidden');
+      }
+    };
+
+    window.addEventListener('beforeunload', () => {
+      if (window.gameState.roomId) {
+        window.leaveCurrentRoom();
+      }
+    });
+  </script>
+</body>
+</html>
